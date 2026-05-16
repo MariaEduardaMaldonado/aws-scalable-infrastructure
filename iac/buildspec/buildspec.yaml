@@ -1,0 +1,24 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo Obtaining AWS Account ID and Region...
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - echo Logging into Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+  pre_build:
+    commands:
+      - echo Build Docker image...
+      - cd app/
+      - docker build -t $ECR_REPOSITORY_NAME -f Dockerfile .
+      - echo Tagging Docker image...
+      - docker tag $ECR_REPOSITORY_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY_NAME:latest
+  build:
+    commands:
+      - echo Pushing Docker image to ECR...
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY_NAME:latest
+  post_build:
+    commands:
+      - echo Updating ECS service...
+      - aws ecs update-service --cluster $ECS_CLUSTER_NAME --service $SERVICE_NAME --force-new-deployment

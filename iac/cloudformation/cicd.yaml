@@ -1,0 +1,251 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to deploy a CodeBuild project and a CodePipeline pipeline.
+
+Parameters:
+  AppRepositoryBranch:
+    Type: String
+  AppGitHubRepo:
+    Type: String
+  GitHubv2ConnectionArn:
+    Type: String
+  BuildSpecPath:
+    Type: String
+  ProjectName:
+    Type: String
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildS3Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${ProjectName}-codepipeline-artifacts/*"
+                  - !Sub "arn:aws:s3:::${ProjectName}-codepipeline-artifacts"
+        - PolicyName: CodeBuildCloudWatchLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+        - PolicyName: CodeBuildECRPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource: "*"
+        - PolicyName: CodeBuildECSPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                  - ecs:StopTask
+                  - ecs:UpdateService
+                Resource: "*"
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodePipelinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - 'codebuild:StartBuild'
+                  - 'codebuild:StopBuild'
+                  - 'codebuild:BatchGet*'
+                  - 'codebuild:Get*'
+                  - 'codebuild:List*'
+                  - iam:PassRole
+                  - cloudwatch:*
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: "*"
+
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                  - codestar-connections:*
+                  - codestar:*
+                Resource:
+                  - !Ref GitHubv2ConnectionArn
+
+  S3BucketForArtifacts:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-codepipeline-artifacts"
+      AccessControl: Private
+        
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3BucketForArtifacts
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt CodeBuildRole.Arn
+                - !GetAtt CodePipelineRole.Arn
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !Sub "arn:aws:s3:::${ProjectName}-codepipeline-artifacts/*"
+              - !Sub "arn:aws:s3:::${ProjectName}-codepipeline-artifacts"
+
+  KMSEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: "KMS key for encrypting CodePipeline artifacts"
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableRootPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: 
+              - "kms:*"
+            Resource: "*"
+          - Sid: AllowCodeBuildAndCodePipeline
+            Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt CodeBuildRole.Arn
+                - !GetAtt CodePipelineRole.Arn
+            Action:
+              - "kms:Encrypt"
+              - "kms:Decrypt"
+              - "kms:GenerateDataKey"
+            Resource: "*"
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${ProjectName}-build
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+        EncryptionDisabled: false
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:5.0
+        EnvironmentVariables:
+        - Name: ECS_CLUSTER_NAME
+          Value: !Sub ${ProjectName}-ecs
+        - Name: SERVICE_NAME
+          Value: !Sub ${ProjectName}-application
+        - Name: ECR_REPOSITORY_NAME
+          Value: !Sub ${ProjectName}
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref BuildSpecPath
+  
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    DependsOn: [KMSEncryptionKey, BucketPolicy]
+    Properties:
+      Name: !Sub ${ProjectName}-pipeline
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref S3BucketForArtifacts
+        EncryptionKey:
+          Type: KMS
+          Id: !Ref KMSEncryptionKey
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeStarSourceConnection
+              Configuration:
+                ConnectionArn: !Ref GitHubv2ConnectionArn
+                FullRepositoryId: !Sub ${AppGitHubRepo}
+                BranchName: !Ref AppRepositoryBranch
+              OutputArtifacts:
+                - Name: SourceOutput
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              RunOrder: 2
+
+Outputs:
+  CodeBuildRoleArn:
+    Description: "ARN for the CodeBuild IAM Role"
+    Value: !GetAtt CodeBuildRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-CodeBuildRoleArn"
+
+  CodePipelineRoleArn:
+    Description: "ARN for the CodePipeline IAM Role"
+    Value: !GetAtt CodePipelineRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-CodePipelineRoleArn"

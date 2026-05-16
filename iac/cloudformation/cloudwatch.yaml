@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to deploy CloudWatch Alarms.
+
+Parameters:
+  ProjectName:
+    Type: String
+  AutoScalingGroupName:
+    Type: String
+  WebEcsScaleInPolicy:
+    Type: String
+  WebEcsScaleOutPolicy:
+    Type: String
+
+Resources:
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingGroupName
+      Cooldown: 300
+      ScalingAdjustment: 1
+
+  ScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingGroupName
+      Cooldown: 900
+      ScalingAdjustment: -1
+  
+  ClusterAlarmCPUUtilizationUpEC2:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/ECS
+      MetricName: CPUUtilization
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 4
+      Dimensions:
+        - Name: ClusterName
+          Value: !Sub ${ProjectName}-ecs
+        - Name: ServiceName
+          Value: !Sub ${ProjectName}-application
+      AlarmActions:
+        - !Ref ScaleUpPolicy
+      AlarmName: !Sub ${ProjectName}-cluster-scale-up-ec2
+      Period: 60
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Statistic: Maximum
+      Threshold: 80
+      TreatMissingData: missing
+      
+  ClusterAlarmCPUUtilizationDownEC2:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/ECS
+      MetricName: CPUUtilization
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 4
+      Dimensions:
+        - Name: ClusterName
+          Value: !Sub ${ProjectName}-ecs
+        - Name: ServiceName
+          Value: !Sub ${ProjectName}-application
+      AlarmActions:
+        - !Ref ScaleDownPolicy
+      AlarmName: !Sub ${ProjectName}-cluster-scale-down-ec2
+      Period: 60
+      ComparisonOperator: LessThanOrEqualToThreshold
+      Statistic: Maximum
+      Threshold: 30
+      TreatMissingData: missing
+  
+  ClusterAlarmCPUUtilizationUp:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/ECS
+      MetricName: CPUUtilization  
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 4
+      Dimensions:
+        - Name: ClusterName
+          Value: !Sub ${ProjectName}-ecs
+        - Name: ServiceName
+          Value: !Sub ${ProjectName}-application
+      AlarmActions:
+        - !Ref WebEcsScaleOutPolicy  
+      AlarmName: !Sub ${ProjectName}-ecs-scale-up
+      Period: 60
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Statistic: Maximum
+      Threshold: 80  
+      TreatMissingData: missing
+
+  ClusterAlarmCPUUtilizationDown:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/ECS
+      MetricName: CPUUtilization 
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 4
+      Dimensions:
+        - Name: ClusterName
+          Value: !Sub ${ProjectName}-ecs
+        - Name: ServiceName
+          Value: !Sub ${ProjectName}-application
+      AlarmActions:
+        - !Ref WebEcsScaleInPolicy 
+      AlarmName: !Sub ${ProjectName}-ecs-scale-down
+      Period: 60
+      ComparisonOperator: LessThanThreshold
+      Statistic: Maximum
+      Threshold: 30 
+      TreatMissingData: missing
+
+Outputs:
+  ScaleUpPolicy:
+    Value: !Ref ScaleUpPolicy
+    Export:
+      Name: !Sub ${ProjectName}ScaleUpPolicy
+
+  ScaleDownPolicy:
+    Value: !Ref ScaleDownPolicy
+    Export:
+      Name: !Sub ${ProjectName}ScaleDownPolicy
+      

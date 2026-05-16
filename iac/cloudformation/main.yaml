@@ -1,0 +1,94 @@
+Parameters:
+  ProjectName:
+    Type: String
+    Default: flask-application
+  AppRepositoryBranch:
+    Type: String
+    Default: main
+  GitHubv2ConnectionArn:
+    Type: String
+    Default: 
+  AppGitHubRepo:
+    Type: String
+    Default: MariaEduardaMaldonado/aws-scalable-infra-web-application
+  BuildSpecPath:
+    Type: String
+    Default: iac/buildspec/buildspec.yaml
+  ACMCertificateArn:
+    Type: String
+    Default: 
+    Description: ARN of the SSL/TLS certificate used to enable HTTPS on the ALB
+  EcsImage:
+    Type: String
+    Default: 
+    Description: run the command and use the ami id (change the AWS region) #aws ssm get-parameters --names /aws/service/ecs/optimized-ami/amazon-linux-2/recommended --region us-east-1
+  EcsMinTasksNumber:
+    Type: String
+    Default: 2
+  EcsMaxTasksNumber:
+    Type: String
+    Default: 4
+
+Resources:
+  VPCStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://infraestrutura-cloudformation-templates.s3.us-east-1.amazonaws.com/vpc.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+
+  CICDStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://infraestrutura-cloudformation-templates.s3.us-east-1.amazonaws.com/cicd.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        AppRepositoryBranch: !Ref AppRepositoryBranch
+        GitHubv2ConnectionArn: !Ref GitHubv2ConnectionArn
+        AppGitHubRepo: !Ref AppGitHubRepo
+        BuildSpecPath: !Ref BuildSpecPath
+  
+  ALBStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: VPCStack
+    Properties:
+      TemplateURL: https://infraestrutura-cloudformation-templates.s3.us-east-1.amazonaws.com/alb.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        ACMCertificateArn: !Ref ACMCertificateArn
+
+  ASGStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ALBStack
+    Properties:
+      TemplateURL: https://infraestrutura-cloudformation-templates.s3.us-east-1.amazonaws.com/asg.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EcsImage: !Ref EcsImage 
+        AsgServiceMax: !Ref EcsMaxTasksNumber
+        AsgServiceMin: !Ref EcsMinTasksNumber
+        AsgServiceDesired: !Ref EcsMinTasksNumber
+        ECSInstanceType: t3.micro
+
+  ECSStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ASGStack
+    Properties:
+      TemplateURL: https://infraestrutura-cloudformation-templates.s3.us-east-1.amazonaws.com/ecs.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EcsMinTasksNumber: !Ref EcsMinTasksNumber
+        EcsMaxTasksNumber: !Ref EcsMaxTasksNumber
+
+  CloudWatchAlarms:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - ASGStack
+      - ECSStack
+    Properties:
+      TemplateURL: https://infraestrutura-cloudformation-templates.s3.us-east-1.amazonaws.com/cloudwatch.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        AutoScalingGroupName: !GetAtt ASGStack.Outputs.AutoScalingGroup
+        WebEcsScaleInPolicy: !GetAtt ECSStack.Outputs.WebEcsScaleInPolicy
+        WebEcsScaleOutPolicy: !GetAtt ECSStack.Outputs.WebEcsScaleOutPolicy

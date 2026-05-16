@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to deploy an ECS cluster and an ECS service.
+
+Parameters:
+  ProjectName:
+    Type: String
+  EcsMinTasksNumber:
+    Type: String
+  EcsMaxTasksNumber:
+    Type: String
+  ContainerPort:
+    Type: String
+    Default: 80
+  ContainerVirtualCPUs:
+    Type: String
+    Default: 512
+  ContainerMemoryMin:
+    Type: String
+    Default: 512
+  ContainerMemoryMax:
+    Type: String
+    Default: LIMITLESS
+  DockerImageVersion:
+    Type: String
+    Default: latest
+  AlbHealthCheckStartPeriod:
+    Type: String
+    Default: 120
+  ContainerNetworkMode:
+    Type: String
+    Default: bridge
+  EcsTypePlacementStrategy:
+    Type: String
+    Default: spread
+  EcsFieldPlacementStrategy:
+    Type: String
+    Default: instanceId
+
+Conditions:
+  hasOnlyOneTask: !Equals [!Ref EcsMinTasksNumber, "1"]
+  hasServiceDiscovery: !Equals [!Ref ContainerNetworkMode, "awsvpc"]
+  containerHasMemoryLimit: !Not [!Equals [!Ref ContainerMemoryMax, "LIMITLESS"]]
+
+Resources:
+  ECRRepository: 
+    Type: AWS::ECR::Repository
+    Properties: 
+      RepositoryName: !Sub ${ProjectName}
+      ImageScanningConfiguration: 
+        ScanOnPush: true
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs-cluster/${ProjectName}
+
+  ECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::Region}-${ProjectName}-ECSRole
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'ecs.amazonaws.com'
+                - 'ecs-tasks.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole'
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Policies:
+      - PolicyName: CloudWatchLogsPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'logs:CreateLogGroup'
+                - 'logs:CreateLogStream'
+                - 'logs:PutLogEvents'
+              Resource: '*'
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${ProjectName}-ecs
+  
+
+  #------------- SERVICE ECS -------------
+
+  ServiceECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub ${ProjectName}-application
+      Cluster: !Ref ECSCluster
+      Role: !GetAtt ECSRole.Arn
+      TaskDefinition: !Ref ServiceTaskDefinition
+      DesiredCount: !Ref EcsMinTasksNumber
+      DeploymentConfiguration:
+        MinimumHealthyPercent: !If [hasOnlyOneTask, 100, 50]
+        MaximumPercent: 200
+      LoadBalancers:
+        -
+          ContainerName: !Sub Application-${ProjectName}
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: 
+            'Fn::ImportValue': !Sub ${ProjectName}AlbDefaultTargetGroup
+      HealthCheckGracePeriodSeconds: !Ref AlbHealthCheckStartPeriod
+      PlacementStrategies:
+        -
+          Type: !Sub ${EcsTypePlacementStrategy}
+          Field: !Sub ${EcsFieldPlacementStrategy}
+      PlacementConstraints:
+        - Type: distinctInstance
+        -
+          Type: memberOf
+          Expression: "attribute:cluster_type == application"
+
+  ServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-application
+      NetworkMode: !Ref ContainerNetworkMode
+      ContainerDefinitions:
+        -
+          Name: !Sub Application-${ProjectName}
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectName}:${DockerImageVersion}
+          PortMappings:
+            -
+              HostPort: 0
+              ContainerPort: !Ref ContainerPort
+          Essential: true
+          MemoryReservation: !Ref ContainerMemoryMin
+          Memory: !If [containerHasMemoryLimit, !Ref ContainerMemoryMax, !Ref 'AWS::NoValue']
+          Cpu: !Ref ContainerVirtualCPUs
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub /ecs-cluster/${ProjectName}
+              awslogs-stream-prefix: /ecs-task-output
+              awslogs-region: !Ref AWS::Region
+          Ulimits:
+            -
+              HardLimit: 90000
+              Name: nofile
+              SoftLimit: 90000
+
+  WebScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: ServiceECSService
+    Properties:
+      MaxCapacity: !Ref EcsMaxTasksNumber
+      MinCapacity: !Ref EcsMinTasksNumber
+      ResourceId: !Sub service/${ProjectName}-ecs/${ServiceECSService.Name}
+      RoleARN: !GetAtt ECSRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  WebEcsScaleOutPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${ProjectName}-WebEcsScaleOut
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref WebScalableTarget
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 120
+        MetricAggregationType: Maximum
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            ScalingAdjustment: 1
+
+  WebEcsScaleInPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${ProjectName}-WebEcsScaleIn
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref WebScalableTarget
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 3600
+        MetricAggregationType: Maximum
+        StepAdjustments:
+          - MetricIntervalUpperBound: 0
+            ScalingAdjustment: -1
+
+Outputs:
+  ECSRoleArn:
+    Value: !Sub ${ECSRole.Arn}
+    Export:
+      Name: !Sub ${ProjectName}ECSRoleArn
+
+  ECSCluster:
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${ProjectName}ECSCluster
+
+  ECSClusterArn:
+    Value: !Sub ${ECSCluster.Arn}
+    Export:
+      Name: !Sub ${ProjectName}ECSClusterArn
+  
+  ServiceName:
+    Value: !GetAtt ServiceECSService.Name
+    Export:
+      Name: !Sub ${ProjectName}-application
+  
+  WebEcsScaleInPolicy:
+    Value: !Ref WebEcsScaleInPolicy 
+    Export:
+      Name: !Sub ${ProjectName}-WebEcsScaleInPolicy
+
+  WebEcsScaleOutPolicy:
+    Value: !Ref WebEcsScaleOutPolicy 
+    Export:
+      Name: !Sub ${ProjectName}-WebEcsScaleOutPolicy

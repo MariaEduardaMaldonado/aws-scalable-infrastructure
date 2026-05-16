@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to deploy an Auto Scaling Group (ASG) with EC2 instances.
+
+Parameters:
+  ProjectName:
+    Type: String
+  ECSInstanceType:
+    Type: String
+  AsgServiceMin:
+    Type: String
+  AsgServiceDesired:
+    Type: String
+  AsgServiceMax:
+    Type: String
+  EcsImage:
+    Type: AWS::EC2::Image::Id
+  EbsEncrypted:
+    Type: String
+    Default: 'yes'
+
+Conditions:
+  isEbsEncrypted: !Equals
+    - !Ref EbsEncrypted
+    - 'yes'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Asg
+      Parameters:
+        - AsgServiceMin
+        - AsgServiceDesired
+        - AsgServiceMax
+
+Resources:
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::Region}-${ProjectName}_EC2Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role'
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref EC2Role
+      InstanceProfileName: !Sub ${AWS::Region}-${ProjectName}-EC2InstanceProfile
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "${ProjectName}-LaunchTemplate"
+      VersionDescription: !Sub "v1"
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt EC2InstanceProfile.Arn
+        ImageId: !Ref EcsImage
+        InstanceType: !Ref ECSInstanceType
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub '${ProjectName}InternalAccessSecurityGroup'
+        BlockDeviceMappings:
+          - DeviceName: "/dev/xvda"
+            Ebs:
+              Encrypted: !If
+                - isEbsEncrypted
+                - true
+                - !Ref 'AWS::NoValue'
+              VolumeSize: 50
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            #====== Install SSM
+            yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
+            start amazon-ssm-agent
+            chkconfig amazon-ssm-agent on
+
+            echo ECS_CLUSTER=${ProjectName}-ecs >> /etc/ecs/ecs.config
+            echo ECS_INSTANCE_ATTRIBUTES={"cluster_type":"application"} >> /etc/ecs/ecs.config
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}
+          PropagateAtLaunch: true
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: !Ref AsgServiceMin
+      DesiredCapacity: !Ref AsgServiceDesired
+      MaxSize: !Ref AsgServiceMax
+      VPCZoneIdentifier:
+        - Fn::ImportValue: !Sub '${ProjectName}-PrivateSubnet1'
+        - Fn::ImportValue: !Sub '${ProjectName}-PrivateSubnet2'
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 1
+        MinInstancesInService: !Ref AsgServiceDesired
+        PauseTime: 'PT5M'
+
+Outputs:
+  AutoScalingGroup:
+    Value: !Ref AutoScalingGroup
+    Export:
+      Name: !Sub ${ProjectName}AutoScalingGroup

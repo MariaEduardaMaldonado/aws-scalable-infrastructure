@@ -1,27 +1,46 @@
 # Infraestrutura Escalável e de Alta Disponibilidade na AWS
 
-**Trabalho de Conclusão de Curso**  
-Instituto Federal de Educação, Ciência e Tecnologia Fluminense — Campus Itaperuna  
+Trabalho de Conclusão de Curso (TCC)
+
+Instituto Federal Fluminense (IFF) – Campus Itaperuna
 Bacharelado em Sistemas de Informação
 
-Repositório oficial do Trabalho de Conclusão de Curso (TCC) — implementação de uma infraestrutura escalável e altamente disponível na nuvem AWS. Este projeto reúne o código da aplicação de exemplo, templates de infraestrutura como código (CloudFormation), e configuração de CI/CD para demonstrar um pipeline de deploy automatizado com containers (ECR / ECS).
+## Sobre o Projeto
 
-## Visão Geral
-O objetivo deste TCC é projetar e implementar uma arquitetura que ofereça alta disponibilidade e escalabilidade automática para uma aplicação web simples em Flask. A solução utiliza serviços da AWS como VPC, Application Load Balancer (ALB), Auto Scaling (ASG), Elastic Container Registry (ECR), Elastic Container Service (ECS), e um pipeline CI/CD com CodeBuild / CodePipeline.
+Este repositório contém a implementação desenvolvida para o Trabalho de Conclusão de Curso sobre infraestrutura escalável e de alta disponibilidade na AWS.
 
-Arquitetura (diagrama): veja `docs/arquitetura.png`.
+A solução utiliza serviços da AWS para provisionar automaticamente uma arquitetura baseada em containers, com balanceamento de carga, escalabilidade automática, monitoramento e pipeline de integração e entrega contínua (CI/CD).
 
-## Tecnologias usadas
-- AWS CloudFormation (IaC)
+## Arquitetura
+
+![Architecture](docs/arquitetura.png)
+
+## Tecnologias
+
+- AWS CloudFormation
 - Amazon VPC
 - Application Load Balancer (ALB)
-- EC2 Auto Scaling / ECS
+- Amazon ECS
+- Auto Scaling Groups
 - Amazon ECR
-- AWS CodeBuild / CodePipeline (CI/CD)
+- AWS CodeBuild
+- AWS CodePipeline
+- Amazon CloudWatch
 - Docker
-- Flask (aplicação de exemplo)
+- Flask
 
-Estrutura do repositório
+## Funcionalidades
+
+- Infraestrutura como Código (IaC) com CloudFormation
+- Balanceamento de carga com Application Load Balancer
+- Escalabilidade automática utilizando Auto Scaling
+- Aplicação containerizada com Docker
+- Armazenamento de imagens no Amazon ECR
+- Orquestração com Amazon ECS
+- Pipeline CI/CD automatizado
+- Monitoramento com Amazon CloudWatch
+
+## Estrutura do Repositório
 
 ```
 aws-scalable-infrastructure/
@@ -80,7 +99,9 @@ python app/app.py
 ```
 
 ## Deploy na AWS (via CloudFormation)
-Os templates de CloudFormation estão em `iac/cloudformation/`. Na implementação destes exemplos, os templates foram carregados em um bucket S3 e o `main.yaml` referencia os templates auxiliares por TemplateURL apontando para os objetos S3.
+Os templates de infraestrutura estão localizados em `iac/cloudformation/` e são organizados como nested stacks. O template principal (`main.yaml`) referencia os demais templates armazenados em um bucket Amazon S3 por meio da propriedade `TemplateURL`.
+
+Na implementação apresentada neste projeto, os templates foram enviados para um bucket S3 e implantados por meio do template principal.
 
 Descrição do procedimento usado (via Console):
 
@@ -105,10 +126,8 @@ Se preferir usar a AWS CLI com a URL do template principal no S3, o comando equi
 aws cloudformation create-stack --stack-name FlaskApplication --template-url https://s3.amazonaws.com/SEU_BUCKET/main.yaml --capabilities CAPABILITY_IAM --parameters ParameterKey=ProjectName,ParameterValue=meu-projeto
 ```
 
-Não altere os templates se você quer replicar exatamente a infraestrutura usada na entrega; apenas forneça os parâmetros corretos e a URL do template principal no S3.
-
 ## CI/CD
-O pipeline de CI/CD é definido pelo arquivo `iac/buildspec/buildspec.yaml` e espera variáveis de ambiente/paramêtros como nomes de repositórios ECR, cluster ECS e conexão GitHub (GitHub v2 Connection ARN). O pipeline realiza:
+O pipeline de CI/CD é definido pelo arquivo `iac/buildspec/buildspec.yaml` e utiliza parâmetros e variáveis de ambiente como nomes de repositórios ECR, cluster ECS e conexão GitHub (GitHub v2 Connection ARN). O pipeline realiza:
 - Build da imagem Docker
 - Push para ECR
 - Atualização do serviço ECS para forçar novo deployment
@@ -116,10 +135,17 @@ O pipeline de CI/CD é definido pelo arquivo `iac/buildspec/buildspec.yaml` e es
 ## Detalhes da Implementação
 Consulte [`docs/implementation.md`](docs/implementation.md) para uma descrição detalhada das etapas realizadas na implementação da infraestrutura, incluindo screenshots e evidências de funcionamento.
 
+## Documentação
+
+- Arquitetura: `docs/arquitetura.png`
+- Implementação: `docs/implementation.md`
+
 ## Autora
+
 Maria Eduarda Lopes Maldonado
 
 ## Orientador
+
 Prof. Me. Francisco Alves de Freitas Neto
 
 ---

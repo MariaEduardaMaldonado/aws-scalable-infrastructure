@@ -1,5 +1,9 @@
 # Implementation
 
-The solution implements a high-availability infrastructure for a Flask web application using CloudFormation templates (VPC, ALB, ASG, ECS, CI/CD, CloudWatch). The templates were uploaded to an S3 bucket, and the main stack (`main.yaml`) was created through the AWS Console; nested stacks and resources were created automatically. The CI/CD pipeline creates Docker images, pushes them to ECR, and triggers deployments in ECS.
+The solution implements a highly available and scalable infrastructure for a Flask web application on AWS using CloudFormation nested stacks. The architecture includes VPC, Application Load Balancer (ALB), Auto Scaling Group (ASG), Amazon ECS, CI/CD pipeline, and CloudWatch monitoring resources.
 
-Screenshots (images in `docs/images/`).
+The CloudFormation templates are stored in an S3 bucket and deployed through the main stack (`main.yaml`). Once the main stack is created, the nested stacks and associated resources are provisioned automatically.
+
+The CI/CD pipeline builds Docker images, pushes them to Amazon ECR, and deploys new application versions to ECS services.
+
+Implementation screenshots are available in `docs/images/`.

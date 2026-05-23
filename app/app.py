@@ -50,7 +50,7 @@ def show_instance_info():
                 <div class="info">Availability Zone: <span>{availability_zone}</span></div>
             </div>
             <div class="footer">
-                <p>&copy; 2025 Load balancing - EC2</p>
+                <p>&copy; 2026 Load balancing - EC2</p>
             </div>
         </body>
     </html>

@@ -87,8 +87,8 @@ Resources:
             start amazon-ssm-agent
             chkconfig amazon-ssm-agent on
 
-            echo ECS_CLUSTER=${ProjectName}-ecs >> /etc/ecs/ecs.config
-            echo ECS_INSTANCE_ATTRIBUTES={"cluster_type":"application"} >> /etc/ecs/ecs.config
+            echo 'ECS_CLUSTER=${ProjectName}-ecs' >> /etc/ecs/ecs.config
+            echo 'ECS_INSTANCE_ATTRIBUTES={"cluster_type":"application"}' >> /etc/ecs/ecs.config
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
